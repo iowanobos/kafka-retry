@@ -52,7 +52,9 @@ func main() {
 
 	var eg errgroup.Group
 	eg.Go(func() error {
-		group.Run(ctx, new(errorConsumer))
+		if err := group.Run(new(errorConsumer)); err != nil {
+			log.Fatalln("run consumer group failed. err: ", err.Error())
+		}
 		return nil
 	})
 	eg.Go(func() error {
@@ -67,7 +69,7 @@ func main() {
 		syscall.SIGQUIT)
 	select {
 	case <-sigc:
-		log.Println("Start shutdowning") // TODO: graceful shutdown плохо работает
+		log.Println("Start shutdowning")
 		cancel()
 		if err := group.Close(); err != nil {
 			log.Println("close consumer group failed. error: ", err.Error())
@@ -83,8 +85,11 @@ func main() {
 
 type errorConsumer struct{}
 
-func (c *errorConsumer) Consume(_ kafka.Message) error {
-	return errors.New("error")
+func (c *errorConsumer) Consume(_ context.Context, _ kafka.Message) error {
+	if rand.Intn(10) > 3 {
+		return errors.New("error")
+	}
+	return nil
 }
 
 func RunProducer(ctx context.Context, cfg *config) error {
@@ -94,7 +99,7 @@ func RunProducer(ctx context.Context, cfg *config) error {
 		Balancer: new(kafka.LeastBytes),
 	}
 
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(time.Millisecond * 100)
 	for range ticker.C {
 
 		select {
@@ -107,7 +112,7 @@ func RunProducer(ctx context.Context, cfg *config) error {
 				if err := w.WriteMessages(ctx, kafka.Message{Value: []byte(id)}); err != nil {
 					return
 				}
-				log.Printf("Write. Value: %s\n", id)
+				//log.Printf("Write. Value: %s\n", id)
 			}()
 		}
 	}

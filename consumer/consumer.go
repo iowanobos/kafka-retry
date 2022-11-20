@@ -1,11 +1,14 @@
 package consumer
 
-import "github.com/segmentio/kafka-go"
+import (
+	"context"
+	"github.com/segmentio/kafka-go"
+)
 
 type Consumer interface {
-	Consume(message kafka.Message) error
+	Consume(ctx context.Context, message kafka.Message) error
 }
 
 type Guard interface {
-	IsStopRetry(message kafka.Message, attempt int) bool
+	IsStopRetry(message kafka.Message, err error, attempt int) bool
 }
