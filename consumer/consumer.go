@@ -9,6 +9,12 @@ type Consumer interface {
 	Consume(ctx context.Context, message kafka.Message) error
 }
 
+type ContinueParam struct {
+	Message kafka.Message
+	Error   error
+	Attempt int
+}
+
 type Continuer interface {
-	Continue(message kafka.Message, err error, attempt int) bool
+	Continue(ctx context.Context, param ContinueParam) bool
 }

@@ -210,7 +210,12 @@ type processedRecords struct {
 
 func (g *generation) retry(ctx context.Context, consumer Consumer, m headerMap, message kafka.Message, err error) {
 	attempt := m.GetAttempt()
-	if continuer, hasContinuer := consumer.(Continuer); !hasContinuer || continuer.Continue(message, err, attempt) {
+	if continuer, hasContinuer := consumer.(Continuer); !hasContinuer || continuer.Continue(ctx,
+		ContinueParam{
+			Message: message,
+			Error:   err,
+			Attempt: attempt,
+		}) {
 		if next, ok := g.nextByTopic[message.Topic]; ok {
 			m.SetAttempt(attempt + 1)
 			nextRetryAt := time.Now().Add(next.Delay)
