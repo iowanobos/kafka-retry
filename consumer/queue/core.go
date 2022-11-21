@@ -1,6 +1,6 @@
 package queue
 
-type priorityQueue[T ~int | int64 | int32] []T
+type priorityQueue[T ~int | int64 | int32 | int16 | int8] []T
 
 func (pq priorityQueue[T]) Root() T {
 	if len(pq) > 0 {

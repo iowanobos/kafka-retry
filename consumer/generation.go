@@ -18,8 +18,8 @@ type generation struct {
 	processedRecords     map[string]map[int]*processedRecords
 	processedMessageChan chan kafka.Message
 
-	gracefulShutdownWg sync.WaitGroup // wait graceful shutdown
-	commitLoopStopped  chan struct{}
+	workersWaitGroup  sync.WaitGroup
+	commitLoopStopped chan struct{}
 }
 
 func (g *Group) newGeneration() (*generation, error) {
@@ -57,10 +57,10 @@ func (g *generation) Run(ctx context.Context, consumer Consumer) {
 		for _, partition := range partitions {
 			messageChan := g.getMessageChan(topic, partition.ID, partition.Offset)
 
-			g.gracefulShutdownWg.Add(g.workerCount)
+			g.workersWaitGroup.Add(g.workerCount)
 			for i := 0; i < g.workerCount; i++ {
 				go func() {
-					defer g.gracefulShutdownWg.Done()
+					defer g.workersWaitGroup.Done()
 
 					for message := range messageChan {
 						m := headersToMap(message.Headers)
@@ -91,7 +91,7 @@ func (g *generation) Run(ctx context.Context, consumer Consumer) {
 	g.runCommitLoop(ctx)
 
 	go func() {
-		g.gracefulShutdownWg.Wait()
+		g.workersWaitGroup.Wait()
 		log.Printf("shutdown. all the workers are stopped")
 		cancel()
 	}()
@@ -198,7 +198,7 @@ func (g *generation) flushOffsets(offsets map[string]map[int]int64) {
 	}
 
 	if err := g.gen.CommitOffsets(offsets); err != nil {
-		log.Printf("commit offsets failed. error: %s\n", err.Error())
+		log.Printf("commit offsets failed. error: %s\n", err)
 	}
 }
 
@@ -210,7 +210,7 @@ type processedRecords struct {
 
 func (g *generation) retry(ctx context.Context, consumer Consumer, m headerMap, message kafka.Message, err error) {
 	attempt := m.GetAttempt()
-	if guard, hasGuard := consumer.(Guard); !hasGuard || !guard.IsStopRetry(message, err, attempt) {
+	if continuer, hasContinuer := consumer.(Continuer); !hasContinuer || continuer.Continue(message, err, attempt) {
 		if next, ok := g.nextByTopic[message.Topic]; ok {
 			m.SetAttempt(attempt + 1)
 			nextRetryAt := time.Now().Add(next.Delay)
@@ -223,7 +223,7 @@ func (g *generation) retry(ctx context.Context, consumer Consumer, m headerMap, 
 				Value:   message.Value,
 				Headers: m.ToHeaders(),
 			}); err != nil {
-				log.Println("producer failed. error: ", err.Error())
+				log.Printf("send retry failed. error: %s\n", err)
 			}
 		}
 	}

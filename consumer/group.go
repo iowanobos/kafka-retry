@@ -118,7 +118,7 @@ func createTopics(ctx context.Context, brokers, topics []string) error {
 		}
 
 		if err = conn.CreateTopics(topicsConfigs...); err != nil {
-			log.Println("create topic failed. error: ", err.Error())
+			log.Printf("create topic failed. error: %s\n", err)
 		} else {
 			log.Println("create topic succeeded")
 			break
@@ -138,7 +138,7 @@ func (g *Group) Run(consumer Consumer) error {
 		case errors.Is(err, context.Canceled):
 			return nil
 		default:
-			log.Println("connect failed. error: ", err.Error())
+			log.Printf("connect failed. error: %s\n", err)
 		}
 
 		log.Println("try to reconnect")
