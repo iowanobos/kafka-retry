@@ -2,12 +2,12 @@ package consumer
 
 import (
 	"context"
-	"log"
 	"sync"
 	"time"
 
 	"github.com/iowanobos/kafka-retry/consumer/queue"
 	"github.com/segmentio/kafka-go"
+	"github.com/sirupsen/logrus"
 )
 
 type generation struct {
@@ -59,6 +59,11 @@ func (g *generation) Run(ctx context.Context, consumer Consumer) {
 
 			g.workersWaitGroup.Add(g.workerCount)
 			for i := 0; i < g.workerCount; i++ {
+				logrus.WithFields(logrus.Fields{
+					"topic":     topic,
+					"partition": partition.ID,
+					"worker":    i,
+				}).Info("worker started")
 				go func() {
 					defer g.workersWaitGroup.Done()
 
@@ -69,7 +74,7 @@ func (g *generation) Run(ctx context.Context, consumer Consumer) {
 							select {
 							case <-ctx.Done(): // graceful shutdown
 								return
-							case <-time.After(time.Until(retryAt)):
+							case <-time.After(time.Until(retryAt)): // wait
 							}
 						}
 
@@ -92,12 +97,12 @@ func (g *generation) Run(ctx context.Context, consumer Consumer) {
 
 	go func() {
 		g.workersWaitGroup.Wait()
-		log.Printf("shutdown. all the workers are stopped")
+		logrus.Debug("shutdown. all the workers are stopped")
 		cancel()
 	}()
 
 	<-g.commitLoopStopped
-	log.Printf("shutdown. commit loop stopped")
+	logrus.Debug("shutdown. commit loop stopped")
 }
 
 func (g *generation) getMessageChan(topic string, partition int, offset int64) chan kafka.Message {
@@ -198,7 +203,7 @@ func (g *generation) flushOffsets(offsets map[string]map[int]int64) {
 	}
 
 	if err := g.gen.CommitOffsets(offsets); err != nil {
-		log.Printf("commit offsets failed. error: %s\n", err)
+		logrus.WithError(err).Warn("commit offsets failed")
 	}
 }
 
@@ -228,7 +233,7 @@ func (g *generation) retry(ctx context.Context, consumer Consumer, m headerMap, 
 				Value:   message.Value,
 				Headers: m.ToHeaders(),
 			}); err != nil {
-				log.Printf("send retry failed. error: %s\n", err)
+				logrus.WithError(err).Warn("send retry failed")
 			}
 		}
 	}

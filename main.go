@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"log"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -15,6 +14,7 @@ import (
 	"github.com/iowanobos/kafka-retry/consumer"
 	"github.com/kelseyhightower/envconfig"
 	"github.com/segmentio/kafka-go"
+	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -29,6 +29,7 @@ type config struct {
 }
 
 func init() {
+	logrus.SetLevel(logrus.DebugLevel)
 	rand.Seed(time.Now().UnixNano())
 }
 
@@ -42,18 +43,18 @@ func main() {
 		Brokers:              strings.Split(cfg.Brokers, ","),
 		Group:                cfg.GroupID,
 		Topic:                cfg.Topic,
-		RetryDelays:          []time.Duration{time.Second * 15, time.Second * 30, time.Second * 60},
+		RetryDelays:          []time.Duration{time.Second * 15, time.Second * 30, time.Second * 35, time.Second * 60}, // TODO: Нельзя менять delay, нужна доработка
 		PartitionWorkerCount: 10,
 		SessionTimeout:       time.Second * 120,
 	})
 	if err != nil {
-		log.Fatalln("create consumer group failed. error: ", err.Error())
+		logrus.WithError(err).Fatal("create consumer group failed")
 	}
 
 	var eg errgroup.Group
 	eg.Go(func() error {
 		if err := group.Run(new(errorConsumer)); err != nil {
-			log.Fatalln("run consumer group failed. err: ", err.Error())
+			logrus.WithError(err).Fatal("run consumer group failed")
 		}
 		return nil
 	})
@@ -69,27 +70,27 @@ func main() {
 		syscall.SIGQUIT)
 	select {
 	case <-sigc:
-		log.Println("Start shutdowning")
-		cancel()
+		logrus.Info("Start shutdowning")
 		if err := group.Close(); err != nil {
-			log.Println("close consumer group failed. error: ", err.Error())
+			logrus.WithError(err).Error("close consumer group failed")
 		}
+		cancel()
 		if err := eg.Wait(); err != nil {
 			if !errors.Is(err, context.Canceled) {
-				log.Println("Shutdown error: ", err.Error())
+				logrus.WithError(err).Error("shutdown failed")
 			}
 		}
 	}
-	log.Println("Application shut downing...")
+	logrus.Info("Application shut downing...")
 }
 
 type errorConsumer struct{}
 
 func (c *errorConsumer) Consume(_ context.Context, _ kafka.Message) error {
-	if rand.Intn(10) > 3 {
+	if rand.Intn(10) > 3 { // 60
 		return errors.New("error")
 	}
-	return nil
+	return nil // 40
 }
 
 func RunProducer(ctx context.Context, cfg *config) error {
@@ -99,7 +100,7 @@ func RunProducer(ctx context.Context, cfg *config) error {
 		Balancer: new(kafka.LeastBytes),
 	}
 
-	ticker := time.NewTicker(time.Millisecond * 100)
+	ticker := time.NewTicker(time.Millisecond * 100) // 10 * 60 = 600
 	for range ticker.C {
 
 		select {
@@ -112,7 +113,7 @@ func RunProducer(ctx context.Context, cfg *config) error {
 				if err := w.WriteMessages(ctx, kafka.Message{Value: []byte(id)}); err != nil {
 					return
 				}
-				//log.Printf("Write. Value: %s\n", id)
+				logrus.Infof("Write. Value: %s\n", id)
 			}()
 		}
 	}

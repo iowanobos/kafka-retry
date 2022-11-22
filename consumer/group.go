@@ -3,7 +3,7 @@ package consumer
 import (
 	"context"
 	"errors"
-	"log"
+	"github.com/sirupsen/logrus"
 	"time"
 
 	"github.com/segmentio/kafka-go"
@@ -116,11 +116,12 @@ func createTopics(ctx context.Context, brokers, topics []string) error {
 		if err != nil {
 			return err
 		}
+		defer conn.Close() // TODO: вынести в метод
 
 		if err = conn.CreateTopics(topicsConfigs...); err != nil {
-			log.Printf("create topic failed. error: %s\n", err)
+			logrus.WithError(err).Warn("create topic failed")
 		} else {
-			log.Println("create topic succeeded")
+			logrus.Info("create topic succeeded")
 			break
 		}
 	}
@@ -130,20 +131,22 @@ func createTopics(ctx context.Context, brokers, topics []string) error {
 
 func (g *Group) Run(consumer Consumer) error {
 	for {
-		gen, err := g.newGeneration()
+		logrus.Info("try to connect")
 
-		switch {
-		case err == nil:
+		gen, err := g.newGeneration()
+		if err != nil {
+			if errors.Is(err, context.Canceled) { // graceful shutdown
+				return nil
+			}
+			logrus.WithError(err).Warn("connect failed")
+		} else {
 			gen.Run(g.gracefulShutdownCtx, consumer)
-		case errors.Is(err, context.Canceled):
-			return nil
-		default:
-			log.Printf("connect failed. error: %s\n", err)
 		}
 
-		log.Println("try to reconnect")
 		select {
-		case <-g.gracefulShutdownCtx.Done():
+		case <-g.gracefulShutdownCtx.Done(): // graceful shutdown
+			logrus.Debug("generation shutdown succeeded")
+			return nil
 		case <-time.After(3 * time.Second): // wait before reconnect
 		}
 	}
